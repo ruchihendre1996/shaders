@@ -1,0 +1,111 @@
+Shader "Custom/HealthBarShader"
+{
+    Properties
+    {
+            _Health("Health", Range(0,1)) = 1
+            _MainTex("Texture", 2D) = "white" {}
+            _BorderSize("Border Size", Range(0,1)) = 1
+
+    }
+        SubShader
+    {
+        Tags { "RenderType" = "Transparent" "Queue" = "Transparent"} //renderd transparent after opaque objs, as they want to read from the depth buffer.
+        pass {
+
+                ZWrite Off
+                //src * X + dst * Y
+                Blend SrcAlpha OneMinusSrcAlpha //alphaBlending
+
+                CGPROGRAM
+                #pragma vertex vert  //initialising vertex shader vert
+                #pragma fragment frag //initialising fragment shader frag
+                #include "UnityCG.cginc"        
+
+                float _Health;
+                sampler2D _MainTex;
+                float _BorderSize;
+
+
+                struct vertStruct //meshData is the input - think vertex, normals, tangents etc.
+                {
+                    float4 vert : POSITION;
+                    float3 normal : TEXCOORD0;
+                    float2 uv : TEXCOORD1;
+
+
+                };
+
+                struct fragStruct //will take the vertex data and get an interpolated version to pass to the frame buffer.
+                {
+
+                    float4 vertex : POSITION;
+                    float3 normals    : TEXCOORD0;
+                    float2 uv : TEXCOORD1;
+
+                };
+
+
+                fragStruct vert(vertStruct v) //vert function that changes the space from local space to clip space.
+                {
+                    fragStruct o;
+                    o.vertex = UnityObjectToClipPos(v.vert); //local space to clip space
+                    o.normals = UnityObjectToWorldNormal(v.normal); //converting normals to world space coordinates.
+                    o.uv = v.uv;//uvs
+                    return o;
+                }
+
+                float InverseLerp(float a, float b, float v) {
+                    return (v - a) / (b - a);
+                }
+
+                float4 frag(fragStruct i) : SV_Target{
+
+
+
+                    //rounded corners clipping
+
+                    float2 coords = i.uv;
+                    coords.y *= 8;
+                    float2 pointOnLineSeg = float2(0.5, clamp(coords.y, 0.5, 7.5));
+                    float sdf = distance(coords, pointOnLineSeg) * 2 - 1;
+                    clip(-sdf);
+
+                    //create border
+                    float borderSdf = sdf + _BorderSize;
+
+                    float pd = fwidth(borderSdf);//get the approx rate of change in screen space of sdf. partial derivative. xScreen and Yscreen Coord approx of length of the vector
+                    // ddx(), ddy() separate partial derivatived for each axis.
+                    // length(float2(ddx(borderSdf), ddy(borderSdf)));
+                    float borderMask = 1-saturate(borderSdf/pd); //divide the sdf with its rate of change for anti aliasing.
+
+                    //return float4(borderSdf.xxx,1);
+                    
+                    float healthbarMask = _Health > i.uv.y; // current health > current y coordinate on the heathbar (0,1)
+
+                    //clip(healthbarMask - 0.5); //depending on if the value is <=0 it will discard the current fragment.
+                    //float _heathBarColorClamp = saturate(InverseLerp(0.2, 0.8, _Health));
+                    //float3 healthbarcolor = lerp(float3(1, 0, 0), float3(0, 1, 0), _heathBarColorClamp);
+                    //float3 bgColor = float3(0, 0, 0);                  
+
+                    //Mathf.lerp // clamped
+                    //lerp() // unclampled
+                  
+                    float3 healthbarColor = tex2D(_MainTex, float2(_Health, i.uv.x));
+                    
+                    if (_Health < 0.2) {
+                        float flash = cos(_Time.y * 5) * 0.4;
+                        healthbarColor *= flash + 1;
+                    }
+                        
+                    
+                    //float3 outColor = lerp(bgColor, healthbarcolor, healthbarMask);
+                    return float4(healthbarColor * healthbarMask * borderMask, 1 );
+                    //return  i.uv.y;
+                   
+                }
+   
+                ENDCG
+                }
+        }
+        FallBack "Diffuse"
+}
